@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jogo Top-View Multiplayer Online</title>
+    <!-- Tailwind CSS CDN para interface moderna -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+        canvas {
+            touch-action: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center justify-center p-3 sm:p-6 font-sans">
+
+    <!-- Container Principal -->
+    <div class="w-full max-w-4xl flex flex-col gap-4">
+        
+        <!-- Header e Controles -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-2xl backdrop-blur-md">
+            <div class="flex items-center gap-3">
+                <div class="relative flex h-3.5 w-3.5">
+                  <span id="statusPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span id="statusDot" class="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+                </div>
+                <div>
+                    <h1 class="font-bold text-base sm:text-lg leading-tight text-white flex items-center gap-2">
+                        <span>Arena Top-View 2D</span>
+                        <span id="roomBadge" class="text-xs font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full">Sala: ---</span>
+                    </h1>
+                    <p class="text-xs text-slate-400" id="statusText">Inicializando conexão...</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3 w-full sm:w-auto">
+                <input 
+                    type="text" 
+                    id="playerNameInput" 
+                    placeholder="Seu Apelido" 
+                    maxlength="12"
+                    class="bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-32 sm:w-40 transition-colors"
+                >
+                <button 
+                    id="copyBtn" 
+                    class="bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-medium text-sm px-4 py-2 rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2 w-full sm:w-auto justify-center"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <span id="copyBtnText">Copiar Link de Convite</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Canvas do Jogo -->
+        <div class="relative bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex justify-center items-center aspect-[16/10]">
+            <canvas id="gameCanvas" class="w-full h-full block"></canvas>
+            
+            <!-- Dica de Controles -->
+            <div class="absolute bottom-3 left-3 bg-slate-900/80 backdrop-blur-md border border-slate-800/80 rounded-xl px-3 py-1.5 text-xs text-slate-400 pointer-events-none hidden sm:block">
+                Use <span class="text-white font-semibold">WASD</span> ou <span class="text-white font-semibold">Setas</span> para mover
+            </div>
+
+            <!-- Contador de Jogadores -->
+            <div class="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-md border border-slate-800/80 rounded-xl px-3 py-1.5 text-xs text-slate-300 font-medium pointer-events-none flex items-center gap-2 shadow-lg">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span>Jogadores na Sala:</span>
+                <span id="playerCount" class="text-indigo-400 font-bold">1</span>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Toast de Notificação -->
+    <div id="toast" class="fixed bottom-6 right-6 bg-slate-900 border border-emerald-500/40 text-emerald-400 px-4 py-3 rounded-xl text-sm font-medium shadow-2xl opacity-0 transform translate-y-2 transition-all duration-300 pointer-events-none flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+        </svg>
+        <span>Link de convite copiado para a área de transferência!</span>
+    </div>
+
+    <script>
+        // --- CONSTANTES & ELEMENTOS DA DOM ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusText = document.getElementById('statusText');
+        const statusDot = document.getElementById('statusDot');
+        const statusPing = document.getElementById('statusPing');
+        const copyBtn = document.getElementById('copyBtn');
+        const copyBtnText = document.getElementById('copyBtnText');
+        const nameInput = document.getElementById('playerNameInput');
+        const playerCountEl = document.getElementById('playerCount');
+        const roomBadge = document.getElementById('roomBadge');
+        const toast = document.getElementById('toast');
+
+        // Resolução fixa de mundo
+        const WORLD_WIDTH = 800;
+        const WORLD_HEIGHT = 500;
+        canvas.width = WORLD_WIDTH;
+        canvas.height = WORLD_HEIGHT;
+
+        // --- GERENCIAMENTO DE SALA E IDENTIDADE ---
+        function getRoomFromURL() {
+            const hash = window.location.hash.replace('#', '');
+            if (hash && hash.length >= 4) return hash;
+            
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('room')) return params.get('room');
+
+            return null;
+        }
+
+        function generateRoomId() {
+            return Math.random().toString(36).substring(2, 8);
+        }
+
+        let currentRoom = getRoomFromURL();
+        if (!currentRoom) {
+            currentRoom = generateRoomId();
+            window.location.hash = currentRoom;
+        } else {
+            window.location.hash = currentRoom;
+        }
+        roomBadge.textContent = 'Sala: ' + currentRoom;
+
+        const myId = 'p_' + Math.random().toString(36).substring(2, 9);
+        const playerColors = ['#f43f5e', '#3b82f6', '#10b981', '#a855f7', '#f59e0b', '#06b6d4', '#ec4899'];
+        const randomColor = playerColors[Math.floor(Math.random() * playerColors.length)];
+
+        // Objeto do jogador local
+        let myPlayer = {
+            id: myId,
+            room: currentRoom,
+            x: Math.floor(Math.random() * (WORLD_WIDTH - 120)) + 60,
+            y: Math.floor(Math.random() * (WORLD_HEIGHT - 120)) + 60,
+            radius: 16,
+            color: randomColor,
+            name: 'Jogador ' + Math.floor(Math.random() * 900 + 100),
+            lastUpdate: Date.now()
+        };
+
+        nameInput.value = myPlayer.name;
+
+        // Lista de todos os jogadores ativos { id: playerData }
+        const players = {};
+        players[myId] = myPlayer;
+
+        // Controle de entrada de teclado
+        const keys = {};
+
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement === nameInput) return;
+            keys[e.key.toLowerCase()] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        nameInput.addEventListener('input', (e) => {
+            myPlayer.name = e.target.value.trim() || 'Sem Nome';
+            sendPosition(true);
+        });
+
+        // --- SISTEMA DE WEBSOCKET PÚBLICO COM FALLBACK ---
+        // Servidores públicos e confiáveis de broadcast WebSocket
+        const WEBSOCKET_SERVERS = [
+            'wss://socketsbay.com/wss/v2/1/demo/',
+            'wss://ws.postman-echo.com/raw'
+        ];
+
+        let ws = null;
+        let wsIndex = 0;
+        let isConnected = false;
+        let broadcastInterval = null;
+
+        function connectWebSocket() {
+            const serverUrl = WEBSOCKET_SERVERS[wsIndex];
+            setStatus('Connecting', 'Conectando ao servidor...');
+
+            try {
+                ws = new WebSocket(serverUrl);
+            } catch (err) {
+                tryNextServer();
+                return;
+            }
+
+            ws.onopen = () => {
+                isConnected = true;
+                setStatus('Connected', 'Conectado e transmitindo');
+                
+                // Envia dados iniciais
+                sendPosition(true);
+
+                // Heartbeat para manter vivos os dados dos jogadores ativos na sala
+                if (broadcastInterval) clearInterval(broadcastInterval);
+                broadcastInterval = setInterval(() => {
+                    sendPosition(false);
+                    cleanInactivePlayers();
+                }, 150);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    // Valida se o pacote é deste jogo, da mesma sala e de outro jogador
+                    if (data && data.room === currentRoom && data.id && data.id !== myId) {
+                        players[data.id] = {
+                            ...data,
+                            lastUpdate: Date.now()
+                        };
+                        updatePlayerCount();
+                    }
+                } catch (e) {
+                    // Ignora mensagens de formato incompatível de outros testes do broker público
+                }
+            };
+
+            ws.onerror = () => {
+                ws.close();
+            };
+
+            ws.onclose = () => {
+                isConnected = false;
+                setStatus('Disconnected', 'Conexão perdida. Reconectando...');
+                if (broadcastInterval) clearInterval(broadcastInterval);
+                
+                // Tenta reconectar após pequeno intervalo
+                setTimeout(() => {
+                    tryNextServer();
+                }, 2000);
+            };
+        }
+
+        function tryNextServer() {
+            wsIndex = (wsIndex + 1) % WEBSOCKET_SERVERS.length;
+            connectWebSocket();
+        }
+
+        function setStatus(state, text) {
+            statusText.textContent = text;
+            if (state === 'Connected') {
+                statusDot.className = "relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500";
+                statusPing.className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75";
+            } else if (state === 'Connecting') {
+                statusDot.className = "relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500";
+                statusPing.className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75";
+            } else {
+                statusDot.className = "relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500";
+                statusPing.className = "hidden";
+            }
+        }
+
+        function sendPosition(force = false) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+            const payload = JSON.stringify({
+                room: currentRoom,
+                id: myPlayer.id,
+                x: Math.round(myPlayer.x),
+                y: Math.round(myPlayer.y),
+                color: myPlayer.color,
+                name: myPlayer.name
+            });
+
+            ws.send(payload);
+        }
+
+        // Remove jogadores que não mandam sinal há mais de 4 segundos
+        function cleanInactivePlayers() {
+            const now = Date.now();
+            let changed = false;
+
+            for (let id in players) {
+                if (id !== myId && (now - players[id].lastUpdate) > 4000) {
+                    delete players[id];
+                    changed = true;
+                }
+            }
+            if (changed) updatePlayerCount();
+        }
+
+        function updatePlayerCount() {
+            playerCountEl.textContent = Object.keys(players).length;
+        }
+
+        // --- SISTEMA DE COPIAR LINK ---
+        copyBtn.addEventListener('click', () => {
+            const inviteUrl = `${window.location.origin}${window.location.pathname}#${currentRoom}`;
+
+            const dummy = document.createElement('textarea');
+            document.body.appendChild(dummy);
+            dummy.value = inviteUrl;
+            dummy.select();
+            document.execCommand('copy');
+            document.body.removeChild(dummy);
+
+            // Animação e feedback visual
+            copyBtnText.textContent = "Copiado!";
+            toast.classList.remove('opacity-0', 'translate-y-2');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                copyBtnText.textContent = "Copiar Link de Convite";
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-2');
+            }, 2500);
+        });
+
+        // --- ATUALIZAÇÃO E MOVIMENTAÇÃO ---
+        function update() {
+            const speed = 3.8;
+            let moved = false;
+
+            if (keys['w'] || keys['arrowup']) {
+                myPlayer.y = Math.max(myPlayer.radius, myPlayer.y - speed);
+                moved = true;
+            }
+            if (keys['s'] || keys['arrowdown']) {
+                myPlayer.y = Math.min(WORLD_HEIGHT - myPlayer.radius, myPlayer.y + speed);
+                moved = true;
+            }
+            if (keys['a'] || keys['arrowleft']) {
+                myPlayer.x = Math.max(myPlayer.radius, myPlayer.x - speed);
+                moved = true;
+            }
+            if (keys['d'] || keys['arrowright']) {
+                myPlayer.x = Math.min(WORLD_WIDTH - myPlayer.radius, myPlayer.x + speed);
+                moved = true;
+            }
+
+            if (moved) {
+                myPlayer.lastUpdate = Date.now();
+                sendPosition();
+            }
+        }
+
+        // --- RENDERIZAÇÃO NO CANVAS ---
+        function draw() {
+            // Fundo escuro cibernético
+            ctx.fillStyle = '#030712';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Desenhar grade futurista
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            const gridSize = 40;
+            
+            ctx.beginPath();
+            for (let x = 0; x < canvas.width; x += gridSize) {
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+            }
+            for (let y = 0; y < canvas.height; y += gridSize) {
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+            }
+            ctx.stroke();
+
+            // Desenhar todos os jogadores da sala
+            for (let id in players) {
+                const p = players[id];
+
+                // Sombra do personagem
+                ctx.beginPath();
+                ctx.arc(p.x, p.y + 4, p.radius, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fill();
+
+                // Círculo principal
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fillStyle = p.color || '#3b82f6';
+                ctx.fill();
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = p.id === myId ? '#ffffff' : '#020617';
+                ctx.stroke();
+
+                // Anel de destaque no jogador atual
+                if (p.id === myId) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius + 6, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+
+                // Tag de Nome
+                ctx.font = '600 12px Inter, sans-serif';
+                ctx.textAlign = 'center';
+                const nameText = p.name || 'Jogador';
+                const textWidth = ctx.measureText(nameText).width;
+
+                // Fundo do nome
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                ctx.beginPath();
+                ctx.roundRect(p.x - textWidth / 2 - 8, p.y - p.radius - 26, textWidth + 16, 20, 6);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Texto do nome
+                ctx.fillStyle = p.id === myId ? '#818cf8' : '#f8fafc';
+                ctx.fillText(nameText, p.x, p.y - p.radius - 12);
+            }
+        }
+
+        // Loop principal do jogo
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Inicialização
+        window.onload = () => {
+            connectWebSocket();
+            gameLoop();
+        };
+    </script>
+</body>
+</html>
